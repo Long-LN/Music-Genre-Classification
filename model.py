@@ -125,3 +125,13 @@ class Model:
         print(f'{holdout_type} FPR (Mood): {FP_m / (FP_m + TN_m)}')
         print(f'{holdout_type} FNR (Mood): {FN_m / (TP_m + FN_m)}')
         print(f'{holdout_type} Accuracy (Mood): {(TP_m + TN_m) / (TP_m + TN_m + FP_m + FN_m)}')
+
+
+    def predict_single(self, feature_vector):
+        """Dự đoán genre và mood cho một vector đặc trưng"""
+        if self.best_estimator is None:
+            raise ValueError("❌ Mô hình chưa được huấn luyện.")
+        
+        preds = self.best_estimator.predict(feature_vector)
+        genre_pred, mood_pred = preds[0]
+        return genre_pred, mood_pred
