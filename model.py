@@ -1,5 +1,5 @@
 from sklearn.pipeline import Pipeline
-from sklearn.model_selection import train_test_split, GridSearchCV, StratifiedKFold
+from sklearn.model_selection import train_test_split, GridSearchCV, KFold
 from sklearn.metrics import confusion_matrix
 from sklearn.preprocessing import LabelEncoder
 from sklearn.multioutput import MultiOutputClassifier
@@ -11,7 +11,6 @@ class Model:
     def __init__(self, feature_matrix, labels_tuple, cfg):
         self.X = feature_matrix
 
-        # labels_tuple = (genre_labels, mood_labels)
         genre_labels, mood_labels = labels_tuple
 
         self.encoder_genre = LabelEncoder()
@@ -21,14 +20,12 @@ class Model:
         self.y_mood = self.encoder_mood.fit_transform(mood_labels)
 
         self.cfg = cfg
-
         self.best_estimator = None
         self.holdout_test_set = None
         self.holdout_val_set = None
 
-
     def train_kfold(self):
-        # Tách dữ liệu stratify theo genre (có thể cân nhắc theo mood hoặc đa nhãn nếu cần)
+        # Tách dữ liệu với nhãn genre làm stratify chính
         X_cv, X_test, y_cv_genre, y_test_genre, y_cv_mood, y_test_mood = train_test_split(
             self.X,
             self.y_genre,
@@ -49,14 +46,13 @@ class Model:
         )
         self.holdout_val_set = (X_val, (y_val_genre, y_val_mood))
 
+        # Pipeline với MultiOutputClassifier
         pipe = Pipeline([
             ('scaler', self.cfg['scaler']),
             ('model', MultiOutputClassifier(self.cfg['base_model']))
         ])
 
-        kf = StratifiedKFold(**self.cfg['kf_dict'])
-
-        # Thay đổi param_grid phù hợp MultiOutputClassifier
+        # Chuyển param_grid sang dạng MultiOutputClassifier
         param_grid = {}
         for k, v in self.cfg['param_grid'].items():
             if k.startswith('model__'):
@@ -67,6 +63,9 @@ class Model:
         if 'iid' in self.cfg['grid_dict']:
             del self.cfg['grid_dict']['iid']
 
+        # ✅ Sử dụng KFold thay cho StratifiedKFold vì nhãn là đa đầu ra
+        kf = KFold(**self.cfg['kf_dict'])
+
         grid_search = GridSearchCV(
             estimator=pipe,
             param_grid=param_grid,
@@ -75,33 +74,27 @@ class Model:
             **self.cfg['grid_dict']
         )
 
-        # Kết hợp nhãn 2 chiều: (n_samples, 2)
+        # Kết hợp nhãn: y = [[genre, mood], ...]
         y_train_multi = np.vstack([y_train_genre, y_train_mood]).T
 
         grid_search.fit(X_train, y_train_multi)
         self.best_estimator = grid_search.best_estimator_
 
-
     def _parse_conf_matrix(self, cnf_matrix):
         TP = np.diag(cnf_matrix)
-        FP = cnf_matrix.sum(axis=0) - np.diag(cnf_matrix)
-        FN = cnf_matrix.sum(axis=1) - np.diag(cnf_matrix)
+        FP = cnf_matrix.sum(axis=0) - TP
+        FN = cnf_matrix.sum(axis=1) - TP
         TN = cnf_matrix.sum() - (FP + FN + TP)
 
-        TP = TP.astype(float)
-        FP = FP.astype(float)
-        TN = TN.astype(float)
-        FN = FN.astype(float)
-
-        return TP, FP, TN, FN
-
+        return TP.astype(float), FP.astype(float), TN.astype(float), FN.astype(float)
 
     def _predict(self, holdout_type):
         if holdout_type == "val":
             X_holdout, (y_holdout_genre, y_holdout_mood) = self.holdout_val_set
-
         elif holdout_type == "test":
             X_holdout, (y_holdout_genre, y_holdout_mood) = self.holdout_test_set
+        else:
+            raise ValueError("holdout_type phải là 'val' hoặc 'test'")
 
         scaler = self.best_estimator['scaler']
         model = self.best_estimator['model']
@@ -109,7 +102,7 @@ class Model:
         X_holdout_scaled = scaler.transform(X_holdout)
         y_pred = model.predict(X_holdout_scaled)  # y_pred.shape = (n_samples, 2)
 
-        # Tính confusion matrix cho từng nhãn riêng
+        # Confusion matrix cho từng đầu ra
         cnf_genre = confusion_matrix(y_holdout_genre, y_pred[:, 0])
         cnf_mood = confusion_matrix(y_holdout_mood, y_pred[:, 1])
 
@@ -118,18 +111,17 @@ class Model:
 
         return (TP_g, FP_g, TN_g, FN_g), (TP_m, FP_m, TN_m, FN_m)
 
-
     def predict(self, holdout_type):
         (TP_g, FP_g, TN_g, FN_g), (TP_m, FP_m, TN_m, FN_m) = self._predict(holdout_type)
 
         print(f'{holdout_type} Set - Genre per class:')
         print(f'TP:{TP_g}, FP:{FP_g}, TN:{TN_g}, FN:{FN_g}')
-        print(f'{holdout_type} False Positive Rate per Genre Class: {FP_g / (FP_g + TN_g)}')
-        print(f'{holdout_type} False Negative Rate per Genre Class: {FN_g / (TP_g + FN_g)}')
-        print(f'{holdout_type} Accuracy per Genre Class: {(TP_g + TN_g) / (TP_g + TN_g + FP_g + FN_g)}')
+        print(f'{holdout_type} FPR (Genre): {FP_g / (FP_g + TN_g)}')
+        print(f'{holdout_type} FNR (Genre): {FN_g / (TP_g + FN_g)}')
+        print(f'{holdout_type} Accuracy (Genre): {(TP_g + TN_g) / (TP_g + TN_g + FP_g + FN_g)}')
 
         print(f'\n{holdout_type} Set - Mood per class:')
         print(f'TP:{TP_m}, FP:{FP_m}, TN:{TN_m}, FN:{FN_m}')
-        print(f'{holdout_type} False Positive Rate per Mood Class: {FP_m / (FP_m + TN_m)}')
-        print(f'{holdout_type} False Negative Rate per Mood Class: {FN_m / (TP_m + FN_m)}')
-        print(f'{holdout_type} Accuracy per Mood Class: {(TP_m + TN_m) / (TP_m + TN_m + FP_m + FN_m)}')
+        print(f'{holdout_type} FPR (Mood): {FP_m / (FP_m + TN_m)}')
+        print(f'{holdout_type} FNR (Mood): {FN_m / (TP_m + FN_m)}')
+        print(f'{holdout_type} Accuracy (Mood): {(TP_m + TN_m) / (TP_m + TN_m + FP_m + FN_m)}')

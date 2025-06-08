@@ -1,0 +1,16 @@
+Location	Genre   Mood
+data/music/Electro/Alan Walker - Fade.mp3	EDM Energetic
+data/music/Electro/Alan Walker - Spectre.mp3	EDM Energetic
+data/music/Electro/DEAF KEV - Invincible [NCS Release].mp3	EDM Energetic
+data/music/Electro/Elektronomia - Sky High [NCS Release].mp3	EDM Energetic
+data/music/Electro/TULE, Chris Linton - Fearless pt. II (feat. Chris Linton) [NCS Release].mp3	EDM Energetic
+data/music/Jazz/From the start.mp3	Jazz    Relaxed
+data/music/Jazz/Hard As Life.mp3	Jazz    Relaxed
+data/music/Jazz/Jazz Guitar.mp3	Jazz    Relaxed
+data/music/Jazz/Jazz Morning.mp3	Jazz    Relaxed
+data/music/Jazz/The last nortune.mp3	Jazz    Relaxed
+data/music/Rock/Doom Eternal OST - The Only Thing They Fear Is You (Mick Gordon) [Doom Eternal Theme].mp3	Rock    Hardcore
+data/music/Rock/Fall Out Boy - Centuries (Lyrics).mp3	Rock    Hardcore
+data/music/Rock/In The End [Official HD Music Video] - Linkin Park.mp3	Rock    Hardcore
+data/music/Rock/KALEO - Way Down We Go (Official Music Video).mp3	Rock    Hardcore
+data/music/Rock/Skillet - -Feel Invincible- [Official Music Video].mp3	Rock    Hardcore
