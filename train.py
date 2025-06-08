@@ -1,70 +1,67 @@
 import os
 import numpy as np
-import pandas as pd
+import pickle
+from tqdm import tqdm
 from audio import AudioFeature
 from model import Model
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
-import pickle
-from tqdm import tqdm
 
-def get_audio_files(genres_dir):
-    """Lấy danh sách các file audio từ thư mục genres"""
-    audio_files = []
-    for genre in os.listdir(genres_dir):
-        genre_path = os.path.join(genres_dir, genre)
-        if os.path.isdir(genre_path):
-            for audio_file in os.listdir(genre_path):
-                if audio_file.endswith('.wav'):
-                    audio_files.append((os.path.join(genre_path, audio_file), genre))
-    return audio_files
+def parse_playlist_file(playlist_path):
+    """Đọc playlist có định dạng: <file_path> <genre> <mood>"""
+    audio_data = []
+    with open(playlist_path, "r", encoding="utf-8") as f:
+        for line in f:
+            parts = line.strip().split()
+            if len(parts) < 3:
+                print(f"⚠️ Bỏ qua dòng không hợp lệ: {line}")
+                continue
+            path = " ".join(parts[:-2])  # Tên file có thể chứa dấu cách
+            genre = parts[-2]
+            mood = parts[-1]
+            if os.path.exists(path):
+                audio_data.append((path, genre, mood))
+            else:
+                print(f"❌ File không tồn tại: {path}")
+    return audio_data
 
-def extract_features(audio_files):
+def extract_features(audio_data):
     """Trích xuất đặc trưng từ các file audio"""
     print("🔍 Đang trích xuất đặc trưng từ các file audio...")
     audio_features = []
-    
-    for path, genre in tqdm(audio_files):
+
+    for path, genre, mood in tqdm(audio_data):
         try:
             audio = AudioFeature(path, genre)
-            # Trích xuất tất cả các đặc trưng có sẵn
-            audio.extract_features(
-                "mfcc",           # Mel-frequency cepstral coefficients
-                "chroma",         # Chroma features
-                "zcr",           # Zero crossing rate
-                "spectral_contrast", # Spectral contrast
-                "rolloff",       # Spectral rolloff
-                "tempo"          # Tempo/BPM
-            )
-            audio_features.append(audio)
+            audio.extract_features("mfcc", "chroma", "zcr", "spectral_contrast", "rolloff", "tempo")
+            audio_features.append((audio, mood))
         except Exception as e:
             print(f"⚠️ Lỗi khi xử lý file {path}: {str(e)}")
             continue
-    
+
     return audio_features
 
 def prepare_training_data(audio_features):
-    """Chuẩn bị dữ liệu cho việc huấn luyện"""
     print("📊 Đang chuẩn bị dữ liệu huấn luyện...")
-    feature_matrix = np.vstack([audio.features for audio in audio_features])
-    genre_labels = [audio.genre for audio in audio_features]
-    return feature_matrix, genre_labels
+    feature_matrix = np.vstack([audio.features for audio, _ in audio_features])
+    genre_labels = [audio.genre for audio, _ in audio_features]
+    mood_labels = [mood for _, mood in audio_features]
+    return feature_matrix, (genre_labels, mood_labels)
 
-def train_model(feature_matrix, genre_labels):
-    """Huấn luyện mô hình với các tham số đã được tối ưu"""
+def train_model(feature_matrix, labels):
     print("🎯 Đang huấn luyện mô hình...")
-    
+
     model_cfg = dict(
-        tt_test_dict=dict(shuffle=True, test_size=0.2),  # 20% cho test set
-        tt_val_dict=dict(shuffle=True, test_size=0.2),   # 20% cho validation set
+        tt_test_dict=dict(shuffle=True, test_size=0.2),
+        tt_val_dict=dict(shuffle=True, test_size=0.2),
         scaler=StandardScaler(copy=True),
         base_model=RandomForestClassifier(
             random_state=42,
-            n_jobs=-1,  # Sử dụng tất cả CPU cores
+            n_jobs=-1,
             class_weight="balanced",
-            n_estimators=500,  # Tăng số lượng cây
+            n_estimators=500,
             bootstrap=True,
-            max_depth=20,      # Giới hạn độ sâu của cây
+            max_depth=20,
             min_samples_split=5,
             min_samples_leaf=2
         ),
@@ -74,57 +71,43 @@ def train_model(feature_matrix, genre_labels):
             model__min_samples_leaf=[2, 3, 4],
             model__max_depth=[15, 20, 25]
         ),
-        grid_dict=dict(
-            n_jobs=-1,
-            refit=True,
-            scoring="balanced_accuracy",
-            verbose=2
-        ),
+        grid_dict=dict(n_jobs=-1, refit=True, scoring="balanced_accuracy", verbose=2),
         kf_dict=dict(n_splits=5, random_state=42, shuffle=True)
     )
 
-    model = Model(feature_matrix, genre_labels, model_cfg)
+    model = Model(feature_matrix, labels, model_cfg)
     model.train_kfold()
-    
-    # Đánh giá mô hình
     print("\n📈 Kết quả trên tập validation:")
     model.predict(holdout_type="val")
     print("\n📈 Kết quả trên tập test:")
     model.predict(holdout_type="test")
-    
+
     return model
 
 def save_model(model, output_path="trained_model.pkl"):
-    """Lưu mô hình đã huấn luyện"""
     print(f"💾 Đang lưu mô hình vào {output_path}...")
     with open(output_path, "wb") as f:
         pickle.dump(model, f)
     print("✅ Đã lưu mô hình thành công!")
 
 def main():
-    print("🎵 BẮT ĐẦU HUẤN LUYỆN MÔ HÌNH PHÂN LOẠI THỂ LOẠI NHẠC 🎵")
-    
-    # Đường dẫn đến thư mục chứa các thể loại nhạc
-    genres_dir = "archive/Data/genres_original"
-    
-    # Lấy danh sách file audio
-    audio_files = get_audio_files(genres_dir)
-    print(f"📁 Tìm thấy {len(audio_files)} file audio")
-    
-    # Trích xuất đặc trưng
-    audio_features = extract_features(audio_files)
+    print("🎵 HUẤN LUYỆN MÔ HÌNH (GENRE + MOOD) 🎵")
+
+    playlist_path = "data/playlist.txt"  # ← sửa tên file nếu bạn đặt khác
+
+    audio_data = parse_playlist_file(playlist_path)
+    print(f"📁 Tìm thấy {len(audio_data)} bản ghi âm hợp lệ")
+
+    audio_features = extract_features(audio_data)
     print(f"✨ Đã trích xuất đặc trưng từ {len(audio_features)} file")
-    
-    # Chuẩn bị dữ liệu
-    feature_matrix, genre_labels = prepare_training_data(audio_features)
-    
-    # Huấn luyện mô hình
-    model = train_model(feature_matrix, genre_labels)
-    
-    # Lưu mô hình
+
+    feature_matrix, labels = prepare_training_data(audio_features)
+
+    model = train_model(feature_matrix, labels)
+
     save_model(model)
-    
+
     print("\n🎉 Quá trình huấn luyện hoàn tất!")
 
 if __name__ == "__main__":
-    main() 
+    main()

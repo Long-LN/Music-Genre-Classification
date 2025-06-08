@@ -11,24 +11,27 @@ from sklearn.preprocessing import StandardScaler
 
 def parse_audio_playlist(playlist):
     df = pd.read_csv(playlist, sep="\t")
-    df = df[["Location", "Genre"]]
+    # Giả sử file dữ liệu bây giờ có cột "Mood" ngoài "Location" và "Genre"
+    df = df[["Location", "Genre", "Mood"]]
     paths = df["Location"].values.astype(str)
     paths = np.char.replace(paths, "Macintosh HD", "")
     genres = df["Genre"].values
-    return zip(paths, genres)
+    moods = df["Mood"].values
+    return zip(paths, genres, moods)
 
 def train_model():
-    print("🔧 Đang huấn luyện mô hình...")
+    print("🔧 Đang huấn luyện mô hình multi-task (Genre + Mood)...")
     all_metadata = parse_audio_playlist("data/Subset.txt")
     audio_features = []
 
-    for path, genre in all_metadata:
+    for path, genre, mood in all_metadata:
         audio = AudioFeature(path, genre)
         audio.extract_features("mfcc", "chroma", "zcr", "spectral_contrast", "rolloff", "tempo", save_local=False)
-        audio_features.append(audio)
+        audio_features.append((audio, mood))
 
-    feature_matrix = np.vstack([audio.features for audio in audio_features])
-    genre_labels = [audio.genre for audio in audio_features]
+    feature_matrix = np.vstack([audio.features for audio, _ in audio_features])
+    genre_labels = [audio.genre for audio, _ in audio_features]
+    mood_labels = [mood for _, mood in audio_features]
 
     model_cfg = dict(
         tt_test_dict=dict(shuffle=True, test_size=0.3),
@@ -42,6 +45,7 @@ def train_model():
             bootstrap=True,
         ),
         param_grid=dict(
+            # Lưu ý đã đổi prefix trong model.py rồi, giữ nguyên tên param như cũ
             model__criterion=["entropy", "gini"],
             model__max_features=["log2", "sqrt"],
             model__min_samples_leaf=np.arange(2, 4),
@@ -50,7 +54,7 @@ def train_model():
         kf_dict=dict(n_splits=3, random_state=42, shuffle=True),
     )
 
-    model = Model(feature_matrix, genre_labels, model_cfg)
+    model = Model(feature_matrix, (genre_labels, mood_labels), model_cfg)
     model.train_kfold()
     model.predict(holdout_type="val")
     model.predict(holdout_type="test")
@@ -67,17 +71,22 @@ def load_model():
     print("📦 Mô hình đã được nạp từ file.")
     return model
 
-def predict_genre(model, mp3_path):
+def predict_genre_mood(model, mp3_path):
     audio = AudioFeature(mp3_path, genre=None)
     audio.extract_features("mfcc", "chroma", "zcr", "spectral_contrast", "rolloff", "tempo")
     X_new = model.best_estimator['scaler'].transform(audio.features.reshape(1, -1))
-    pred_index = model.best_estimator['model'].predict(X_new)[0]
-    genre = model.encoder.inverse_transform([pred_index])[0]
+    y_pred = model.best_estimator['model'].predict(X_new)[0]  # y_pred là array 2 phần tử: [genre_idx, mood_idx]
+
+    genre = model.encoder_genre.inverse_transform([y_pred[0]])[0]
+    mood = model.encoder_mood.inverse_transform([y_pred[1]])[0]
+
     print(f"\n🎵 File '{mp3_path}' được dự đoán là thể loại: {genre}")
-    return genre
+    print(f"😎 Và tâm trạng: {mood}")
+
+    return genre, mood
 
 if __name__ == "__main__":
-    print("🎧 HỆ THỐNG PHÂN LOẠI THỂ LOẠI NHẠC 🎶")
+    print("🎧 HỆ THỐNG PHÂN LOẠI THỂ LOẠI & TÂM TRẠNG NHẠC 🎶")
     choice = input("👉 Bạn muốn:\n1. Huấn luyện lại mô hình\n2. Dự đoán bằng mô hình đã có\nChọn (1 hoặc 2): ")
 
     if choice == "1":
@@ -92,4 +101,4 @@ if __name__ == "__main__":
     if not os.path.exists(mp3_path):
         print("❌ Không tìm thấy file mp3. Kiểm tra lại đường dẫn.")
     else:
-        predict_genre(model, mp3_path)
+        predict_genre_mood(model, mp3_path)
